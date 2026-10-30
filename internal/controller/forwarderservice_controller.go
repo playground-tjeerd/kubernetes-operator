@@ -42,6 +42,8 @@ const (
 // ForwarderServiceReconciler reconciles a EndpointSlice object
 type ForwarderServiceReconciler struct {
 	client.Client
+
+	Instance k8sutil.Instance
 }
 
 func (r *ForwarderServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -50,7 +52,7 @@ func (r *ForwarderServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if !svc.DeletionTimestamp.IsZero() {
+	if !svc.DeletionTimestamp.IsZero() || !r.Instance.Owns(svc) {
 		return ctrl.Result{}, nil
 	}
 

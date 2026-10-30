@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nbv1 "github.com/netbirdio/kubernetes-operator/api/v1"
+	"github.com/netbirdio/kubernetes-operator/internal/k8sutil"
 	"github.com/netbirdio/kubernetes-operator/internal/util"
 )
 
@@ -31,6 +32,7 @@ type ServiceReconciler struct {
 	NamespacedNetworks  bool
 	ControllerNamespace string
 	DefaultLabels       map[string]string
+	Instance            k8sutil.Instance
 }
 
 const (
@@ -67,6 +69,10 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Special case for kubernetes API Service
 	// Handled by Helm chart
 	if svc.Namespace == "default" && svc.Name == "kubernetes" {
+		return ctrl.Result{}, nil
+	}
+
+	if !r.Instance.Owns(&svc) {
 		return ctrl.Result{}, nil
 	}
 

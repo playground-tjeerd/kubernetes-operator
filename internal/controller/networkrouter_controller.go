@@ -46,6 +46,7 @@ type NetworkRouterReconciler struct {
 	Netbird       *netbird.Client
 	ManagementURL string
 	ClientImage   string
+	Instance      k8sutil.Instance
 }
 
 // +kubebuilder:rbac:groups=netbird.io,resources=networkrouters,verbs=get;list;watch;create;update;patch;delete
@@ -112,6 +113,7 @@ func (r *NetworkRouterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Create the group used by the router to discover peers.
 	groupAC := nbv1alpha1ac.Group(fmt.Sprintf("networkrouter-%s", netRouter.Name), req.Namespace).
+		WithLabels(r.Instance.Labels()).
 		WithOwnerReferences(ownerRef).
 		WithSpec(
 			nbv1alpha1ac.GroupSpec().
@@ -137,6 +139,7 @@ func (r *NetworkRouterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Create the setup key used by routing peers.
 	setupKeyAC := nbv1alpha1ac.SetupKey(fmt.Sprintf("networkrouter-%s", netRouter.Name), req.Namespace).
+		WithLabels(r.Instance.Labels()).
 		WithOwnerReferences(ownerRef).
 		WithSpec(
 			nbv1alpha1ac.SetupKeySpec().
@@ -214,6 +217,7 @@ func (r *NetworkRouterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	forwarderName := fmt.Sprintf("networkrouter-%s-forwarder", req.Name)
 	forwarderSvcAC := corev1ac.Service(forwarderName, req.Namespace).
 		WithLabels(map[string]string{ForwarderRouterNameLabel: netRouter.Name}).
+		WithLabels(r.Instance.Labels()).
 		WithOwnerReferences(ownerRef).
 		WithSpec(
 			corev1ac.ServiceSpec().

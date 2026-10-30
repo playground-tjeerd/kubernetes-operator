@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	kruntimeutil "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -34,6 +36,7 @@ import (
 	nbv1 "github.com/netbirdio/kubernetes-operator/api/v1"
 	nbv1alpha1 "github.com/netbirdio/kubernetes-operator/api/v1alpha1"
 	"github.com/netbirdio/kubernetes-operator/internal/controller"
+	"github.com/netbirdio/kubernetes-operator/internal/k8sutil"
 	nbwebhookv1 "github.com/netbirdio/kubernetes-operator/internal/webhook/v1"
 	"github.com/netbirdio/kubernetes-operator/pkg/version"
 )
@@ -69,6 +72,7 @@ func main() {
 		allowAutomaticPolicyCreation bool
 		defaultLabels                string
 		gatewayAPIEnabled            bool
+		operatorInstance             string
 	)
 	flag.StringVar(&runtimeNamespace, "runtime-namespace", "", "Namespace the controller is running in")
 	flag.StringVar(&managementURL, "netbird-management-url", "https://api.netbird.io", "Management service URL")
@@ -101,6 +105,13 @@ func main() {
 		"Default labels used for all resources, in format key=value,key=value",
 	)
 	flag.BoolVar(&gatewayAPIEnabled, "gateway-api-enabled", false, "When true Gateway API resources will be reconciled.")
+	flag.StringVar(
+		&operatorInstance,
+		"operator-instance",
+		"",
+		"Only reconcile netbird.io resources labelled "+k8sutil.InstanceLabel+"=<value>. "+
+			"When empty, only resources without that label are reconciled.",
+	)
 
 	// Controller generic flags
 	var (
@@ -144,6 +155,21 @@ func main() {
 	if netbirdClientImage == "" {
 		netbirdClientImage = version.NetbirdClientImage
 	}
+	instance := k8sutil.Instance(operatorInstance)
+	if err := instance.Validate(); err != nil {
+		setupLog.Error(err, "invalid operator instance")
+		os.Exit(1)
+	}
+	// GatewayClasses share one controllerName, so two instances would both claim them.
+	if instance != "" && gatewayAPIEnabled {
+		setupLog.Error(errors.New("gateway API is only supported on the default operator instance"), "invalid configuration")
+		os.Exit(1)
+	}
+	cacheByObject, err := instance.CacheByObject(scheme)
+	if err != nil {
+		setupLog.Error(err, "unable to build cache options")
+		os.Exit(1)
+	}
 
 	defaultLabelsMap := make(map[string]string)
 	if defaultLabels != "" {
@@ -155,6 +181,7 @@ func main() {
 			defaultLabelsMap[kv[0]] = kv[1]
 		}
 	}
+	maps.Copy(defaultLabelsMap, instance.Labels())
 
 	// Setup webhook server.
 	type TLSOption = func(*tls.Config)
@@ -192,11 +219,14 @@ func main() {
 		Client: client.Options{
 			FieldOwner: "netbird-operator",
 		},
+		Cache: cache.Options{
+			ByObject: cacheByObject,
+		},
 		WebhookServer:           webhookServer,
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElectionNamespace: runtimeNamespace,
 		LeaderElection:          enableLeaderElection,
-		LeaderElectionID:        "operator.netbird.io",
+		LeaderElectionID:        leaderElectionID(instance),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -245,6 +275,7 @@ func main() {
 			NamespacedNetworks:  namespacedNetworks,
 			ControllerNamespace: runtimeNamespace,
 			DefaultLabels:       defaultLabelsMap,
+			Instance:            instance,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "Service")
 			os.Exit(1)
@@ -303,6 +334,7 @@ func main() {
 			Netbird:       nbClient,
 			ClientImage:   netbirdClientImage,
 			ManagementURL: managementURL,
+			Instance:      instance,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to create controller", "controller", "NetworkRouter")
 			os.Exit(1)
@@ -322,7 +354,8 @@ func main() {
 			os.Exit(1)
 		}
 		if err := (&controller.ForwarderServiceReconciler{
-			Client: mgr.GetClient(),
+			Client:   mgr.GetClient(),
+			Instance: instance,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to create controller", "controller", "ForwarderService")
 			os.Exit(1)
@@ -332,6 +365,7 @@ func main() {
 			ApiKey:        netbirdAPIKey,
 			ManagementURL: managementURL,
 			Image:         kubeAPIProxyImage,
+			Instance:      instance,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to create controller", "controller", "ClusterProxy")
 			os.Exit(1)
@@ -395,6 +429,13 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func leaderElectionID(instance k8sutil.Instance) string {
+	if instance == "" {
+		return "operator.netbird.io"
+	}
+	return string(instance) + ".operator.netbird.io"
 }
 
 func getRuntimeNamespace(runtimeNamespace string) (string, error) {

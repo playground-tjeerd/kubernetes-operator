@@ -47,6 +47,9 @@ spec:
           {{- if .Values.gatewayAPI.enabled }}
           - --gateway-api-enabled=true
           {{- end }}
+          {{- with .Values.operator.instance }}
+          - --operator-instance={{ . }}
+          {{- end }}
           {{- if .Values.managementURL }}
           - --netbird-management-url={{.Values.managementURL}}
           {{- end }}

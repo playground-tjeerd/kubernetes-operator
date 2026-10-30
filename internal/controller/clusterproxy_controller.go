@@ -32,6 +32,7 @@ type ClusterProxyReconciler struct {
 	ApiKey        string
 	ManagementURL string
 	Image         string
+	Instance      k8sutil.Instance
 }
 
 // +kubebuilder:rbac:groups=netbird.io,resources=clusterproxies,verbs=get;list;watch;create;update;patch;delete
@@ -60,6 +61,7 @@ func (r *ClusterProxyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Create the setup key used by routing peers.
 	setupKeyAC := nbv1alpha1ac.SetupKey(fmt.Sprintf("clusterproxy-%s", clusterProxy.Name), req.Namespace).
+		WithLabels(r.Instance.Labels()).
 		WithOwnerReferences(ownerRef).
 		WithSpec(
 			nbv1alpha1ac.SetupKeySpec().

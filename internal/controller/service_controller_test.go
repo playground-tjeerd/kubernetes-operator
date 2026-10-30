@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nbv1 "github.com/netbirdio/kubernetes-operator/api/v1"
+	"github.com/netbirdio/kubernetes-operator/internal/k8sutil"
 )
 
 var _ = Describe("Service Controller", func() {
@@ -127,6 +128,24 @@ var _ = Describe("Service Controller", func() {
 					Expect(service.Finalizers).To(BeEmpty())
 					nbResource := &nbv1.NBResource{}
 					Expect(k8sClient.Get(ctx, typeNamespacedName, nbResource)).NotTo(Succeed())
+				})
+			})
+			When("Service belongs to another operator instance", func() {
+				BeforeEach(func() {
+					service.Annotations = map[string]string{ServiceExposeAnnotation: "trueish"}
+					service.Labels = map[string]string{k8sutil.InstanceLabel: "cp2"}
+					Expect(k8sClient.Update(ctx, service)).To(Succeed())
+				})
+
+				It("should change nothing", func() {
+					_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+						NamespacedName: typeNamespacedName,
+					})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(k8sClient.Get(ctx, typeNamespacedName, service)).To(Succeed())
+					Expect(service.Finalizers).To(BeEmpty())
+					nbrp := &nbv1.NBRoutingPeer{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "router"}, nbrp)).NotTo(Succeed())
 				})
 			})
 			When("NBRoutingPeer doesn't exist", func() {

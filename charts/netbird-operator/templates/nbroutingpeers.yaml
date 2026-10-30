@@ -10,6 +10,9 @@ metadata:
   labels:
     app.kubernetes.io/component: operator
     {{- include "netbird-operator.labels" $ | nindent 4 }}
+    {{- with $.Values.operator.instance }}
+    netbird.io/operator-instance: {{ . | quote }}
+    {{- end }}
   annotations:
     helm.sh/resource-policy: keep
   name: router
@@ -53,6 +56,9 @@ metadata:
   labels:
     app.kubernetes.io/component: operator
     {{- include "netbird-operator.labels" $ | nindent 4 }}
+    {{- with $.Values.operator.instance }}
+    netbird.io/operator-instance: {{ . | quote }}
+    {{- end }}
   annotations:
     helm.sh/resource-policy: keep
   name: router

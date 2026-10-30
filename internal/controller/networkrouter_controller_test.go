@@ -20,6 +20,7 @@ import (
 	"github.com/netbirdio/netbird/shared/management/http/api"
 
 	nbv1alpha1 "github.com/netbirdio/kubernetes-operator/api/v1alpha1"
+	"github.com/netbirdio/kubernetes-operator/internal/k8sutil"
 	"github.com/netbirdio/kubernetes-operator/internal/netbirdmock"
 )
 
@@ -155,6 +156,50 @@ var _ = Describe("NetworkRouter Controller", func() {
 			routingPeerResp, err := netRouterRec.Netbird.Networks.Routers(netRouter.Status.NetworkID).Get(ctx, netRouter.Status.RoutingPeerID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect((*routingPeerResp.PeerGroups)[0]).To(Equal(group.Status.GroupID))
+		})
+
+		It("labels the resources it creates with its operator instance", func() {
+			netRouterRec.Instance = "cp2"
+			zoneReq := api.ZoneRequest{
+				Name:   "cluster.local",
+				Domain: "cluster.local",
+			}
+			_, err := netRouterRec.Netbird.DNSZones.CreateZone(ctx, zoneReq)
+			Expect(err).ToNot(HaveOccurred())
+
+			netRouter := &nbv1alpha1.NetworkRouter{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      nn.Name,
+					Namespace: nn.Namespace,
+					Labels:    map[string]string{k8sutil.InstanceLabel: "cp2"},
+				},
+				Spec: nbv1alpha1.NetworkRouterSpec{
+					DNSZoneRef: nbv1alpha1.DNSZoneReference{
+						Name: "cluster.local",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, netRouter)).To(Succeed())
+			child := client.ObjectKey{Name: fmt.Sprintf("networkrouter-%s", netRouter.Name), Namespace: nn.Namespace}
+			for range 3 {
+				_, err := netRouterRec.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = groupRec.Reconcile(ctx, reconcile.Request{NamespacedName: child})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = setupKeyRec.Reconcile(ctx, reconcile.Request{NamespacedName: child})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			group := &nbv1alpha1.Group{}
+			Expect(k8sClient.Get(ctx, child, group)).To(Succeed())
+			Expect(group.Labels).To(HaveKeyWithValue(k8sutil.InstanceLabel, "cp2"))
+			setupKey := &nbv1alpha1.SetupKey{}
+			Expect(k8sClient.Get(ctx, child, setupKey)).To(Succeed())
+			Expect(setupKey.Labels).To(HaveKeyWithValue(k8sutil.InstanceLabel, "cp2"))
+			forwarder := &corev1.Service{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: child.Name + "-forwarder", Namespace: nn.Namespace}, forwarder)).To(Succeed())
+			Expect(forwarder.Labels).To(HaveKeyWithValue(k8sutil.InstanceLabel, "cp2"))
+			Expect(forwarder.Labels).To(HaveKeyWithValue(ForwarderRouterNameLabel, netRouter.Name))
 		})
 
 		It("is ready only while every routing peer is ready", func() {

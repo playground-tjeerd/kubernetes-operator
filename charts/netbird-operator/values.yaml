@@ -35,6 +35,11 @@ webhook:
   failurePolicy: Fail
 
 operator:
+  # Only reconcile netbird.io resources labelled netbird.io/operator-instance=<instance>.
+  # Leave empty for a single operator per cluster; it then ignores resources with that label.
+  # Use a distinct value per release to run operators for several management servers in one cluster.
+  instance: ""
+
   # This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
   replicaCount: 1
 
